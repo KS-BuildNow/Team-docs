@@ -1,0 +1,114 @@
+name: Update Project on PR Merge
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  update-project:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true
+    
+    steps:
+      - name: Update Project Status to Done
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = context.payload.pull_request;
+            const prBody = pr.body || '';
+            
+            // PR body에서 이슈 번호 추출 (e.g., "Closes #10", "Fixes #11")
+            const issueRegex = /(?:closes|fixes|resolves|close|fix|resolve)[\s]+#(\d+)/gi;
+            const matches = [...prBody.matchAll(issueRegex)];
+            const issueNumbers = matches.map(match => parseInt(match[1]));
+            
+            console.log(`PR #${pr.number} merged. Linked issues: ${issueNumbers.join(', ') || 'none'}`);
+            
+            if (issueNumbers.length === 0) {
+              console.log('No linked issues found in PR body.');
+              return;
+            }
+            
+            // 프로젝트 정보
+            const projectId = 'PVT_kwDOEatDps4BbjSV';
+            const statusFieldId = 'PVTSSF_lADOEatDps4BbjSVzhWTCX4';
+            const doneOptionId = '98236657'; // Done
+            
+            // 각 이슈에 대해 프로젝트 카드 찾고 상태 업데이트
+            for (const issueNum of issueNumbers) {
+              try {
+                // 이슈 정보 조회
+                const issueResponse = await github.rest.issues.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNum
+                });
+                
+                const issueId = issueResponse.data.node_id;
+                console.log(`Issue #${issueNum} ID: ${issueId}`);
+                
+                // GraphQL로 프로젝트 아이템 찾기
+                const queryResult = await github.graphql(`
+                  query($projectId:ID!, $first:Int!) {
+                    node(id: $projectId) {
+                      ... on ProjectV2 {
+                        items(first: $first, query: "is:open") {
+                          nodes {
+                            id
+                            content {
+                              ... on Issue {
+                                number
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                `, {
+                  projectId: projectId,
+                  first: 50
+                });
+                
+                // 해당 이슈의 프로젝트 아이템 찾기
+                const projectItem = queryResult.node.items.nodes.find(
+                  item => item.content?.number === issueNum
+                );
+                
+                if (!projectItem) {
+                  console.log(`Issue #${issueNum} not found in project.`);
+                  continue;
+                }
+                
+                const itemId = projectItem.id;
+                console.log(`Found project item for issue #${issueNum}: ${itemId}`);
+                
+                // 상태를 Done으로 업데이트
+                const updateResult = await github.graphql(`
+                  mutation($projectId:ID!, $itemId:ID!, $fieldId:ID!, $value:ProjectV2FieldValue!) {
+                    updateProjectV2ItemFieldValue(input: {
+                      projectId: $projectId
+                      itemId: $itemId
+                      fieldId: $fieldId
+                      value: $value
+                    }) {
+                      projectV2Item {
+                        id
+                      }
+                    }
+                  }
+                `, {
+                  projectId: projectId,
+                  itemId: itemId,
+                  fieldId: statusFieldId,
+                  value: {
+                    singleSelectOptionId: doneOptionId
+                  }
+                });
+                
+                console.log(`✓ Updated issue #${issueNum} status to Done`);
+              } catch (error) {
+                console.error(`Error processing issue #${issueNum}:`, error.message);
+              }
+            }

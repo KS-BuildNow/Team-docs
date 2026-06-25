@@ -1,0 +1,4 @@
+# Default code owners: assign to the org team `buildnow`.
+# Update as needed. Team format: @org/team-slug
+
+*    @KS-BuildNow/buildnow
