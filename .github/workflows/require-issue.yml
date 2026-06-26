@@ -1,0 +1,21 @@
+name: Require Issue Link
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  check-issue-link:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for issue reference
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if echo "$PR_BODY" | grep -iE "(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved) #[0-9]+|#[0-9]+" > /dev/null; then
+            echo "Issue reference found ✅"
+          else
+            echo "❌ PR 본문에 이슈 번호가 없습니다."
+            echo "예시: Closes #12 또는 #12 형태로 이슈를 연결해주세요."
+            exit 1
+          fi
